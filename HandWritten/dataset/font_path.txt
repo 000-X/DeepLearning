@@ -1,0 +1,14 @@
+H:\pro_yzy\HandWritten\dataset\font1
+H:\pro_yzy\HandWritten\dataset\font10
+H:\pro_yzy\HandWritten\dataset\font11
+H:\pro_yzy\HandWritten\dataset\font12
+H:\pro_yzy\HandWritten\dataset\font13
+H:\pro_yzy\HandWritten\dataset\font14
+H:\pro_yzy\HandWritten\dataset\font2
+H:\pro_yzy\HandWritten\dataset\font3
+H:\pro_yzy\HandWritten\dataset\font4
+H:\pro_yzy\HandWritten\dataset\font5
+H:\pro_yzy\HandWritten\dataset\font6
+H:\pro_yzy\HandWritten\dataset\font7
+H:\pro_yzy\HandWritten\dataset\font8
+H:\pro_yzy\HandWritten\dataset\font9
