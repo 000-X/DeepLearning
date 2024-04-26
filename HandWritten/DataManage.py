@@ -14,11 +14,15 @@ class DatasetManager:
 
         # 数据增强操作
         self.augmented_transforms = transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.9, 1.1)),
             transforms.RandomVerticalFlip(),
             transforms.GaussianBlur(3),
             transforms.RandomRotation(10),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
         # 基础预处理操作
@@ -60,13 +64,17 @@ class DatasetManager:
             train_dataset,
             batch_size=self.batch_size,
             shuffle=shuffle_train,
-            collate_fn=collate_fn.collate_fn
+            collate_fn=collate_fn.collate_fn,
+            num_workers=4,
+            pin_memory=True
         )
         val_loader = DataLoader(
             val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            collate_fn=collate_fn.collate_fn
+            collate_fn=collate_fn.collate_fn,
+            num_workers=4,
+            pin_memory=True
         )
 
         return train_loader, val_loader

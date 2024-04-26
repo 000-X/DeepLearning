@@ -86,15 +86,15 @@ class HandwritingOCRDataset(Dataset):
         # 处理字符边界伸缩映射情况; flag是对应一维序列数组的索引
         labels_loc, flag = stand_labels_loc(
             image_annotations=annotation,
-            feat_width=7,
-            feat_height=7,
+            feat_width=14,
+            feat_height=14,
             image_width=original_width,
             image_height=original_height,
         )
         # 处理文本映射情况，基于序列化
         # 初始化文本标签序列为"空白"类别
         # 初始化文本标签序列
-        labels_cls = torch.full((49,), self.char_to_idx['NULL'], dtype=torch.long)  # 假设None对应无字符的情况
+        labels_cls = torch.full((14 * 14,), self.char_to_idx['NULL'], dtype=torch.long)  # 假设None对应无字符的情况
 
         for char_info in annotation['chars']:
             i = char_info['char_index']

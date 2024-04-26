@@ -1,15 +1,20 @@
 import json
 
 import torch
-import torch.nn as nn
+
+from HandWritten import loss
 
 charset_path = 'Generate/txt/Characters.txt'
 
 
 def read_characters(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        characters = [line.strip() for line in file if line.strip() != '']
-    return characters
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            characters = [line.strip() for line in file if line.strip() != '']
+        return characters
+    except IOError as e:
+        print(f"Error reading {file_path}: {e}")
+        return []
 
 
 # 定义函数，用于输出数据内容至文档
@@ -19,57 +24,44 @@ def print_val(labels_pre, bbox_pre, cls_real, bbox_real, flag):
     out_real = f'output/real_json_{flag + 1}.json'
     char_set = read_characters(charset_path)
     idx_to_char = {idx: char for idx, char in enumerate(char_set)}
-    cls = labels_pre.view(bbox_pre.shape[0], bbox_pre.shape[1], len(char_set))
-    pre = []
-    real = []
 
-    # 解码并输出预测值
-    max_probs, indices = torch.max(cls, dim=2)  # 获取最大概率的索引
-    chars = [[idx_to_char[idx.item()] for idx in indices[i]] for i in range(indices.shape[0])]
-    # 将localization输出转换为列表格式
-    bboxes = [bbox_pre[i].tolist() for i in range(bbox_pre.shape[0])]
-    for i in range(len(chars)):
-        image_results = []
-        for j in range(len(chars[i])):
-            image_results.append({
-                'char': chars[i][j],
-                'bbox': bboxes[i][j]
-            })
-        pre.append(image_results)
+    # Process predictions and real data
+    pre, real = [], []
+    for i, (cls_pred, loc_pred, cls_gt, loc_gt) in enumerate(zip(labels_pre, bbox_pre, cls_real, bbox_real)):
+        # print((cls_pred, loc_pred, cls_gt, loc_gt))
+        pred_chars, gt_chars = [], []
+        for idx, (cls_p, loc_p, cls_g, loc_g) in enumerate(zip(cls_pred, loc_pred, cls_gt, loc_gt)):
+            # print((cls_p, loc_p, cls_g, loc_g))
+            char_pred = idx_to_char[torch.argmax(cls_p).item()]
+            char_gt = idx_to_char[cls_g.cpu().item()]
+            pred_chars.append({'char': char_pred, 'bbox': loc_p.tolist()})
+            gt_chars.append({'char': char_gt, 'bbox': loc_g.tolist()})
+        pre.append(pred_chars)
+        real.append(gt_chars)
 
-    # 解码输出真实值
-    # [bat_size, 49]
-    # [bat_size 49, 4]
-    cls = [cls_real[i].tolist() for i in range(cls_real.shape[0])]
-    bboxes = [bbox_real[i].tolist() for i in range(bbox_real.shape[0])]
-    for i in bboxes:  # 批次
-        res = []
-        for idx, j in enumerate(i):
-            res.append({
-                'char': idx_to_char[cls[idx]],
-                'bbox': j
-            })
-        real.append(res)
-
-    # 将解码值输出至文本 sample.txt
+    # Write to JSON
     out_to_json(out_pre, out_real, pre, real)
 
 
 # 解码值输出至 sample.txt, 用于比对数据
 def out_to_json(path1, path2, pre, real):
-    with open(path1, 'w+', encoding='utf-8') as file:
-        json.dump(pre, file, indent=4)  # 使用缩进提高可读性
-
-    with open(path2, 'w+', encoding='utf-8') as file:
-        json.dump(real, file, indent=4)  # 使用缩进提高可读性
+    try:
+        with open(path1, 'w', encoding='utf-8') as f:
+            json.dump(pre, f, indent=4)
+        with open(path2, 'w', encoding='utf-8') as f:
+            json.dump(real, f, indent=4)
+    except IOError as e:
+        print(f"Error writing to JSON: {e}")
 
 
 class HandwritingOCRTrainer:
     def __init__(self, model, device='CPU'):
         self.device = device
-        self.model = model
-        self.criterion_classification = nn.CrossEntropyLoss()
-        self.criterion_localization = nn.SmoothL1Loss()
+        self.model = model.to(device)
+        # self.criterion_classification = nn.CrossEntropyLoss()
+        # self.criterion_localization = nn.SmoothL1Loss()
+        self.cls_loss = loss.LabelSmoothingCrossEntropy(smoothing=0.1)
+        self.loc_loss = loss.CIoULoss()
         self.optimizer = torch.optim.Adam([
             {'params': model.cnn.parameters(), 'lr': 1e-5},  # 预训练层
             {'params': model.rnn.parameters(), 'lr': 1e-3},  # 新添加层
@@ -83,67 +75,86 @@ class HandwritingOCRTrainer:
     def train_epoch(self, dataloader):
         self.model.train()
         total_loss = 0
+        total_acc = 0
+        num_batches = 0
         for images, targets in dataloader:
             self.optimizer.zero_grad()
 
-            labels = (targets['labels'].to(self.device)).view(-1)
+            images = images.to(self.device)
+            labels = targets['labels'].to(self.device)  # [batch_size, seq_len, num_classes]
             boxes = targets['boxes'].to(self.device)
             classifications, localizations = self.model(images)
             # print(f"classification shape --> {classifications.shape}")
             # print(f"localization shape --> {localizations.shape}")
 
-            loss_classification = self.criterion_classification(classifications, labels)
-            loss_localization = self.criterion_localization(localizations, boxes)
-            total_loss = loss_classification + loss_localization
-
+            loss_cls = self.cls_loss(classifications, labels)
+            loss_loc = self.loc_loss(localizations.view(-1, 4), boxes.view(-1, 4))
+            total_loss = (loss_loc * 0.5) + (loss_cls * 0.5)
+            # print(f"Train loss_cls: {loss_cls}, Train loss_loc: {loss_loc}")
             total_loss.backward()
             self.optimizer.step()
-            total_loss += total_loss.item()
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"Training Loss: {avg_loss}")
-        return avg_loss
+            cls_acc = loss.classification_accuracy(classifications, labels)
+            loc_acc = loss.localization_accuracy(localizations, boxes)
+            # print(f"Training cls_acc: {cls_acc}; loc_acc: {loc_acc}")
+
+            total_acc += cls_acc + loc_acc
+            total_loss += total_loss.item()
+            num_batches += 1
+
+        avg_loss = total_loss / num_batches
+        avg_acc = total_acc / num_batches
+        print(f"Training Loss: {avg_loss}; Training AVG_ACC: {avg_acc}")
+        return avg_loss, avg_acc
 
     def validate(self, dataloader, fa=0, flag=0):
         self.model.eval()
         total_loss = 0
+        total_acc = 0
+        num_batches = 0
+        flag = 0
         with torch.no_grad():
             for images, targets in dataloader:
-                labels = (targets['labels'].to(self.device)).view(-1)  # [batch_size * seq_len, num_classes]
+                images = images.to(self.device)
+                labels = targets['labels'].to(self.device)  # [batch_size, seq_len, num_classes]
                 boxes = targets['boxes'].to(self.device)
                 classifications, localizations = self.model(images)
 
-                loss_classification = self.criterion_classification(classifications, labels)
-                loss_localization = self.criterion_localization(localizations, boxes)
-                total_loss += loss_classification.item() + loss_localization.item()
+                loss_cls = self.cls_loss(classifications, labels)
+                loss_loc = self.loc_loss(localizations.view(-1, 4), boxes.view(-1, 4))
+                total_loss += (loss_loc * 0.5) + (loss_cls * 0.5)
+                print(f"val loss_cls: {loss_cls}, val loss_loc: {loss_loc}")
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"Validation Loss: {avg_loss}")
-        # 打印验证信息
-        if fa != 0:
-            print_val(classifications, localizations, labels, boxes, flag)
-        return avg_loss
+                cls_acc = loss.classification_accuracy(classifications, labels)
+                loc_acc = loss.localization_accuracy(localizations, boxes)
+                print(f"Training cls_acc: {cls_acc}; loc_acc: {loc_acc}")
 
-    def train(self, train_dataloader, val_dataloader, epochs, early_stopping_threshold=5):
+                total_acc += cls_acc + loc_acc
+                num_batches += 1
+                if flag // 10 == 0:
+                    print_val(classifications, localizations, labels, boxes, flag)
+                else:
+                    flag += 1
+
+        avg_loss = total_loss / num_batches
+        avg_acc = total_acc / num_batches
+        print(f"Training Loss: {avg_loss}; Training AVG_ACC: {avg_acc}")
+        return avg_loss, avg_acc
+
+    def train(self, train_dataloader, val_dataloader, epochs, early_stopping_threshold=10):
         best_val_loss = float('inf')
-        no_improve_epoch = 0
         for epoch in range(epochs):
             print(f"Epoch {epoch + 1}/{epochs}:")
-            train_loss = self.train_epoch(train_dataloader)
-            val_loss = self.validate(val_dataloader)
+            train_loss, train_acc = self.train_epoch(train_dataloader)
+            val_loss, val_acc = self.validate(val_dataloader)
             self.scheduler.step(val_loss)
-            current_lr = self.scheduler.get_last_lr()[0]
             print(f"Epoch {epoch + 1}: Training Loss = {train_loss}, Validation Loss = {val_loss}")
-            print(f"Current learning rate: {current_lr}")
-            print(f"Best_val_loss: {best_val_loss}")
-
+            print(f"Epoch {epoch + 1}: Training ACC = {train_acc}, Validation ACC = {val_acc}")
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_model = self.model.state_dict()
-                no_improve_epoch = 0
-            else:
-                no_improve_epoch += 1
-
-            if no_improve_epoch >= early_stopping_threshold:
-                print("Early stopping due to no improvement in validation loss.")
+            if epoch - best_val_loss > early_stopping_threshold:
+                print("Early stopping triggered.")
                 break
+        self.model.load_state_dict(best_model)
+        print("Training completed.")

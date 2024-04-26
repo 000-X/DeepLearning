@@ -7,13 +7,14 @@ class CustomOCRModel(nn.Module):
     def __init__(self, num_classes, device='CPU'):
         super(CustomOCRModel, self).__init__()
         self.classes = num_classes
-        self.device = torch.device(device)  # 确定设备
-        self.cnn = nn.Sequential(*list(resnet50(weights=ResNet50_Weights.DEFAULT).children())[:-2])
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # 更新，采用ResNet50倒数第四层，增加特征图空间大小，feature.shape [14*14]
+        self.cnn = nn.Sequential(*list(resnet50(weights=ResNet50_Weights.DEFAULT).children())[:-3])
 
         # 输出通道2048是通过ResNet50的倒数第三层得到的。
         # 该层目的：适配 RNN 层输入特征
         self.conv_adapter = nn.Sequential(
-            nn.Conv2d(2048, 256, kernel_size=1),
+            nn.Conv2d(1024, 256, kernel_size=1),
             nn.ReLU()  # 在特征适配层后添加ReLU
         )
         self.rnn = nn.LSTM(256, 256, num_layers=2, bidirectional=True, batch_first=True)
@@ -35,14 +36,12 @@ class CustomOCRModel(nn.Module):
         x = x.to(self.device)
         features = self.cnn(x)
         # print(f"features shape --> {features.shape}")
-        features = self.conv_adapter(features)  # 获得的shape --> [batch_size, 256, 7, 7]
-        # shape 设置为：[batch_size, 7*7, 256]
-        # -1 表示特征图的空间维度[7, 7]
+        features = self.conv_adapter(features)
         features = features.view(features.size(0), -1, 256)  # Adjust shape for RNN
         rnn_out, _ = self.rnn(features)
         attention_weights = torch.softmax(self.attention(rnn_out), dim=1)
         attended_features = rnn_out * attention_weights.expand_as(rnn_out)
-        classification = (self.classifier(attended_features)).view(-1, self.classes)
+        classification = self.classifier(attended_features)
         # print(f"classification shape --> {classification.shape}")
         localization = self.localizer(attended_features)
         # print(f"localization shape --> {localization.shape}")
