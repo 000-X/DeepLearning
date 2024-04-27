@@ -33,7 +33,8 @@ def print_val(labels_pre, bbox_pre, cls_real, bbox_real, flag):
         for idx, (cls_p, loc_p, cls_g, loc_g) in enumerate(zip(cls_pred, loc_pred, cls_gt, loc_gt)):
             # print((cls_p, loc_p, cls_g, loc_g))
             char_pred = idx_to_char[torch.argmax(cls_p).item()]
-            char_gt = idx_to_char[cls_g.cpu().item()]
+            char_gt = idx_to_char[cls_g.item()]
+            print(f"char_pred --> {char_pred}; char_gt --> {char_gt}")
             pred_chars.append({'char': char_pred, 'bbox': loc_p.tolist()})
             gt_chars.append({'char': char_gt, 'bbox': loc_g.tolist()})
         pre.append(pred_chars)
