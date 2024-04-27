@@ -101,6 +101,10 @@ class HandwritingOCRDataset(Dataset):
             labels_cls[flag[i]] = char_idx  # 直接赋值，无需创建新的 tensor
             i += 1
 
+        cls = torch.full((len(labels_cls), self.num_classes), 0, dtype=torch.long)
+        for i, sequence in enumerate(labels_cls):
+             cls[i, sequence] = 1
+
         # print(f"image shape --> {image.shape}")
         # print(f"cls shape --> {labels_cls.shape}")    # 字符集的长度序列
         # print(f"cls --> {labels_cls}")    # 字符集的长度序列
