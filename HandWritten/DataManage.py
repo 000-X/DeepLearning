@@ -65,7 +65,7 @@ class DatasetManager:
             batch_size=self.batch_size,
             shuffle=shuffle_train,
             collate_fn=collate_fn.collate_fn,
-            num_workers=4,
+            num_workers=2,
             pin_memory=True
         )
         val_loader = DataLoader(
@@ -73,7 +73,7 @@ class DatasetManager:
             batch_size=self.batch_size,
             shuffle=False,
             collate_fn=collate_fn.collate_fn,
-            num_workers=4,
+            num_workers=2,
             pin_memory=True
         )
 
