@@ -123,7 +123,7 @@ class HandwritingOCRTrainer:
 
                 loss_cls = self.cls_loss(classifications, labels)
                 loss_loc = self.loc_loss(localizations.view(-1, 4), boxes.view(-1, 4))
-                total_loss += (loss_loc * 0.5) + (loss_cls * 0.5)
+                total_loss += (loss_loc * 1.0) + (loss_cls * 1.0)
                 print(f"val loss_cls: {loss_cls}, val loss_loc: {loss_loc}")
 
                 cls_acc = loss.classification_accuracy(classifications, labels)
