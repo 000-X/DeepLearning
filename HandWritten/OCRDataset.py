@@ -95,11 +95,11 @@ class HandwritingOCRDataset(Dataset):
         # 初始化文本标签序列为"空白"类别
         # 初始化文本标签序列
         labels_cls = torch.full((14 * 14,), self.char_to_idx['NULL'], dtype=torch.long)  # 假设None对应无字符的情况
-
+        i = 0
         for char_info in annotation['chars']:
-            i = char_info['char_index']
             char_idx = self.char_to_idx.get(char_info['text_char'], self.char_to_idx['NULL'])  # 使用默认索引值防止 None
             labels_cls[flag[i]] = char_idx  # 直接赋值，无需创建新的 tensor
+            i += 1
 
         # print(f"image shape --> {image.shape}")
         # print(f"cls shape --> {labels_cls.shape}")    # 字符集的长度序列
