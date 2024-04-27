@@ -30,7 +30,7 @@ def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, im
         feature_y = int(y_center / scale_y)
 
         # 确保索引在有效范围内
-        feature_index = feature_y * 7 + feature_x
+        feature_index = feature_y * feat_width + feature_x
         if 0 <= feature_index < seq_len:
             # 归一化坐标
             norm_bbox = [
@@ -39,8 +39,9 @@ def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, im
                 round(bbox[2] / image_width, 5),
                 round(bbox[3] / image_height, 5)
             ]
-            loc.append((feature_index, torch.tensor(norm_bbox, dtype=torch.float)))
-            flag.append(feature_index)
+            if feature_index not in loc:
+                loc.append((feature_index, torch.tensor(norm_bbox, dtype=torch.float)))
+                flag.append(feature_index)
 
     # 填充序列化标签
     labels_loc = torch.zeros((seq_len, 4), dtype=torch.float)
