@@ -89,7 +89,7 @@ class HandwritingOCRTrainer:
 
             loss_cls = self.cls_loss(classifications, labels)
             loss_loc = self.loc_loss(localizations.view(-1, 4), boxes.view(-1, 4))
-            total_loss = (loss_loc * 0.5) + (loss_cls * 0.5)
+            total_loss = (loss_loc * 1.0) + (loss_cls * 1.0)
             # print(f"Train loss_cls: {loss_cls}, Train loss_loc: {loss_loc}")
             total_loss.backward()
             self.optimizer.step()
@@ -150,11 +150,5 @@ class HandwritingOCRTrainer:
             self.scheduler.step(val_loss)
             print(f"Epoch {epoch + 1}: Training Loss = {train_loss}, Validation Loss = {val_loss}")
             print(f"Epoch {epoch + 1}: Training ACC = {train_acc}, Validation ACC = {val_acc}")
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model = self.model.state_dict()
-            if epoch - best_val_loss > early_stopping_threshold:
-                print("Early stopping triggered.")
-                break
-        self.model.load_state_dict(best_model)
+            
         print("Training completed.")
