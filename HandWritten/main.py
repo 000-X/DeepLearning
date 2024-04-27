@@ -31,7 +31,7 @@ if __name__ == '__main__':
     train.train(
         train_dataloader=train_data,
         val_dataloader=val_data,
-        epochs=10000,
+        epochs=2000,
     )
     save_path = 'PTH/save_model.pth'
     torch.save(model.state_dict(), save_path)
