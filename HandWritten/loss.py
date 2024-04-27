@@ -9,9 +9,12 @@ import torch.nn.functional as f
 class CIoULoss(nn.Module):
     def __init__(self):
         super(CIoULoss, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'CPU')
 
     def forward(self, preds, targets):
         # Extract coordinates
+        preds = preds.to(self.device)
+        targets = targets.to(self.device)
         b1_x1, b1_y1, b1_x2, b1_y2 = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
         b2_x1, b2_y1, b2_x2, b2_y2 = targets[:, 0], targets[:, 1], targets[:, 2], targets[:, 3]
 
@@ -46,6 +49,7 @@ class LabelSmoothingCrossEntropy(nn.Module):
     def __init__(self, smoothing=0.1):
         super(LabelSmoothingCrossEntropy, self).__init__()
         self.smoothing = smoothing
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'CPU')
 
     def forward(self, preds, labels):
         """
@@ -54,8 +58,9 @@ class LabelSmoothingCrossEntropy(nn.Module):
                     preds (Tensor): 预测输出，形状为 [batch_size, seq_len, num_classes], logits未经softmax
                     labels (Tensor): 真实标签，形状为 [batch_size, seq_len]，每个值为类别索引
                 """
+        preds = preds.to(self.device)
+        labels = labels.to(self.device)
         batch_size, seq_len, num_classes = preds.size()
-        device = preds.device
 
         # 创建平滑的标签
         # true_dist的每一项都是smoothing / (num_classes - 1)
