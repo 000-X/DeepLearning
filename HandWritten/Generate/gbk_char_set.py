@@ -33,8 +33,8 @@ def Sample_save_Characters(sample_path, output_file_path):
 
 # 输入文件路径和输出文件路径
 input_file_path = 'txt/zifuji.txt'
-output_file_path = 'Characters.txt'
+output_file_path = 'txt/Characters.txt'
 sample_path = 'txt/Sample.txt'
 # 调用函数
-extract_and_save_characters(input_file_path, output_file_path, 4000)
+extract_and_save_characters(input_file_path, output_file_path, 2000)
 Sample_save_Characters(sample_path, output_file_path)

@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as f
@@ -9,9 +10,12 @@ import torch.nn.functional as f
 class CIoULoss(nn.Module):
     def __init__(self):
         super(CIoULoss, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'CPU')
 
     def forward(self, preds, targets):
         # Extract coordinates
+        preds = preds.to(self.device)
+        targets = targets.to(self.device)
         b1_x1, b1_y1, b1_x2, b1_y2 = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
         b2_x1, b2_y1, b2_x2, b2_y2 = targets[:, 0], targets[:, 1], targets[:, 2], targets[:, 3]
 
@@ -41,61 +45,97 @@ class CIoULoss(nn.Module):
         return (1 - ciou).mean()
 
 
-# 自定义Label Smoothing Cross Entropy Loss
-class LabelSmoothingCrossEntropy(nn.Module):
-    def __init__(self, smoothing=0.1):
-        super(LabelSmoothingCrossEntropy, self).__init__()
-        self.smoothing = smoothing
+class SmoothL1LossMasked(nn.Module):
+    def __init__(self):
+        super(SmoothL1LossMasked, self).__init__()
 
-    def forward(self, preds, labels):
+    def forward(self, preds, targets, mask):
         """
-                前向传播计算损失
-                参数:
-                    preds (Tensor): 预测输出，形状为 [batch_size, seq_len, num_classes], logits未经softmax
-                    labels (Tensor): 真实标签，形状为 [batch_size, seq_len]，每个值为类别索引
-                """
-        batch_size, seq_len, num_classes = preds.size()
-        device = preds.device
+        preds: [batch_size, seq_len, 4] 预测的边界框
+        targets: [batch_size, seq_len, 4] 真实的边界框
+        mask: [batch_size, seq_len] 一个布尔张量，True 表示有效的数据点
+        """
+        # 应用掩码
+        # 扩展 mask 以匹配 preds 和 targets 的最后一维
+        mask_expanded = mask.unsqueeze(-1).expand_as(preds)
 
-        # 创建平滑的标签
-        # true_dist的每一项都是smoothing / (num_classes - 1)
-        true_dist = torch.full_like(preds, fill_value=self.smoothing / (num_classes - 1))
-        # 将真实标签的对应位置设置为1-smoothing
-        # 使用scatter_来更新true_dist中对应标签的置信度
-        true_dist.scatter_(2, labels.unsqueeze(2), 1.0 - self.smoothing)
+        # 使用掩码过滤 preds 和 targets
+        preds_masked = torch.where(mask_expanded, preds, torch.tensor(0.0).to(preds.device))
+        targets_masked = torch.where(mask_expanded, targets, torch.tensor(0.0).to(targets.device))
 
-        # 使用log_softmax计算log概率
-        log_probs = f.log_softmax(preds, dim=2)
+        # 计算平滑 L1 损失
+        loss = f.smooth_l1_loss(preds_masked, targets_masked, reduction='none')
 
-        # 计算标签平滑交叉熵损失
-        loss = -torch.sum(log_probs * true_dist, dim=2).mean()  # 计算每个时间步的损失，然后求均值
+        # 计算掩码位置的平均损失
+        # 注意确保分母不为零
+        masked_elements = mask_expanded.sum(dim=[0, 1])  # 计算有效损失元素的总数
+        loss = loss.sum(dim=[0, 1]) / masked_elements.clamp(min=1)  # 防止除以零
 
+        return loss
+
+
+class MaskedCrossEntropyLoss(nn.Module):
+    def __init__(self):
+        super(MaskedCrossEntropyLoss, self).__init__()
+        self.loss_fn = nn.CrossEntropyLoss(reduction='none')
+
+    def forward(self, logits, targets, mask):
+        """
+        logits: [batch_size, seq_len, num_classes]
+        targets: [batch_size, seq_len]
+        mask: [batch_size, seq_len], Boolean tensor where `True` indicates a valid data point
+        """
+        # 扁平化数据
+        logits_flat = logits.view(-1, logits.size(-1))
+        targets_flat = targets.view(-1)
+        mask_flat = mask.view(-1)
+        # 计算损失
+        losses = self.loss_fn(logits_flat, targets_flat)
+        # 应用掩码
+        masked_losses = losses * mask_flat.type_as(losses)  # 确保掩码与损失具有相同的数据类型
+        # 计算平均损失
+        # 防止除以零，确保至少有一个有效的元素
+        loss = masked_losses.sum() / mask_flat.float().sum().clamp(min=1.0)
+
+        return loss
+
+
+# 组合loss
+class CombinedLoss(nn.Module):
+    def __init__(self, cls_weight=0.5, loc_weight=0.5):
+        super(CombinedLoss, self).__init__()
+        # self.cls_loss = nn.CrossEntropyLoss()
+        # self.loc_loss = nn.SmoothL1Loss()
+        self.cls_loss = MaskedCrossEntropyLoss()
+        self.loc_loss = SmoothL1LossMasked()
+        self.cls_weight = cls_weight
+        self.loc_weight = loc_weight
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    def forward(self, cls_preds, loc_preds, cls_targets, loc_targets):
+        #  cls_preds shape [bat, seq_len, num_classes]
+        #  loc_preds shape [bat, seq_len]
+        cls_mask, loc_mask = create_masks(cls_targets, loc_targets)
+        cls_loss = self.cls_loss(cls_preds, cls_targets, cls_mask)
+        loc_loss = self.loc_loss(loc_preds, loc_targets, loc_mask)
+        loss = cls_loss * self.cls_weight + loc_loss * self.loc_weight
         return loss
 
 
 # acc性能评估
 def bbox_iou(box1, box2):
-    """
-    计算两个边界框之间的IoU。
-    box1, box2: [batch_size, seq_len, 4]，边界框定义为 [x1, y1, x2, y2]
-    """
-    # 计算交集的坐标
     inter_x1 = torch.max(box1[..., 0], box2[..., 0])
     inter_y1 = torch.max(box1[..., 1], box2[..., 1])
     inter_x2 = torch.min(box1[..., 2], box2[..., 2])
     inter_y2 = torch.min(box1[..., 3], box2[..., 3])
 
-    # 计算交集面积
     inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
 
-    # 计算每个边界框的面积
     box1_area = (box1[..., 2] - box1[..., 0]) * (box1[..., 3] - box1[..., 1])
     box2_area = (box2[..., 2] - box2[..., 0]) * (box2[..., 3] - box2[..., 1])
 
-    # 计算并集面积
     union_area = box1_area + box2_area - inter_area
 
-    # 计算IoU
     iou = inter_area / union_area
     return iou
 
@@ -108,27 +148,102 @@ def localization_accuracy(preds, labels, iou_threshold=0.5):
     - labels: 真实的边界框，形状 [batch_size, seq_len, 4]
     - iou_threshold: 认为定位正确的IoU阈值
     """
-    ious = bbox_iou(preds, labels)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    _, mask = create_masks(preds, labels)
+    ious = bbox_iou(preds.to(device), labels.to(device))
     # 计算IoU大于阈值的比例
-    correct_localizations = (ious > iou_threshold).float()  # 将bool转为float
-    accuracy = correct_localizations.mean()
-    return accuracy.item() * 100  # 返回百分比
+    valid_ious = ious[mask]
+    correct_localizations = (valid_ious > iou_threshold).float()
+    accuracy = correct_localizations.mean() if correct_localizations.numel() > 0 else torch.tensor(0.0)
+
+    return accuracy * 100  # 返回百分比
 
 
 # 分类ACC
-def classification_accuracy(preds, labels):
-    """
-    计算分类准确率，假设preds是logits（未经Softmax处理）
-    参数:
-    - preds: 模型的输出logits，形状 [batch_size, seq_len, num_classes]
-    - labels: 真实的分类标签，形状 [batch_size, seq_len]
-    """
-    # 应用Softmax函数将logits转换为概率分布
+def classification_accuracy(preds, labels, mask=None):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    preds, labels = preds.to(device), labels.to(device)
+    if mask is None:
+        mask = labels != 0
+
     probs = f.softmax(preds, dim=-1)
-    # 获得每个序列位置上最可能的分类
     predicted_classes = probs.argmax(dim=2)
-    # 比较预测结果与真实标签
-    correct_predictions = (predicted_classes == labels).float()  # 转换为浮点数以便计算平均值
-    # 计算整个批次的平均准确率
-    accuracy = correct_predictions.mean()
-    return accuracy.item() * 100  # 返回百分比
+    correct_predictions = (predicted_classes == labels).float() * mask.float()
+    total_valid = mask.sum().float()
+    accuracy = correct_predictions.sum() / total_valid
+
+    return accuracy * 100
+
+
+def create_masks(batch_labels_cls, batch_labels_loc):
+    """
+    Create masking arrays for classification and localization tasks based on label data.
+
+    Args:
+    batch_labels_cls (torch.Tensor): The classification labels tensor.
+    batch_labels_loc (torch.Tensor): The localization labels tensor.
+
+    Returns:
+    tuple: A tuple containing two tensors (mask_cls, mask_loc) where:
+        mask_cls (torch.Tensor): Mask for classification tasks. True for valid data points.
+        mask_loc (torch.Tensor): Mask for localization tasks. True for rows with any non-zero values.
+    """
+    # Ensure inputs are tensors
+    if not isinstance(batch_labels_cls, torch.Tensor):
+        batch_labels_cls = torch.tensor(batch_labels_cls)
+    if not isinstance(batch_labels_loc, torch.Tensor):
+        batch_labels_loc = torch.tensor(batch_labels_loc)
+
+    # Classification mask: True for non-zero values indicating valid data
+    mask_cls = batch_labels_cls != 0
+
+    # Localization mask: True in rows where any element is non-zero
+    mask_loc = torch.any(batch_labels_loc != 0, dim=-1)
+
+    return mask_cls, mask_loc
+
+
+class EarlyStopping:
+    """提前停止以防止模型过拟合"""
+
+    def __init__(self, patience=7, verbose=False, delta=0, path='checkpoint.pt', trace_func=print):
+        """
+        Args:
+            patience (int): 监控指标没有改进的轮数后停止训练.
+            verbose (bool): 如果为True，则打印提前停止的消息
+            delta (float): 最小改变量，改变量小于这个值不视为改进
+            path (str): 模型最佳状态的保存路径
+            trace_func (function): 用于输出信息的函数
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+        self.path = path
+        self.trace_func = trace_func
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            self.trace_func(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        """保存模型当验证损失减少时"""
+        if self.verbose:
+            self.trace_func(
+                f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
+        torch.save(model.state_dict(), self.path)
+        self.val_loss_min = val_loss

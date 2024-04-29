@@ -2,7 +2,9 @@
 <project version="4">
   <component name="Encoding">
     <file url="file://$PROJECT_DIR$/HandWritten/Generate/font" charset="GBK" />
-    <file url="file://$PROJECT_DIR$/HandWritten/Generate/font" charset="GBK" />
     <file url="file://$PROJECT_DIR$/HandWritten/Generate/txt" charset="GBK" />
+    <file url="file://$PROJECT_DIR$/HandWritten/Generate/txt/Characters.txt" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/HandWritten/Generate/txt/image_to_txt/txt1.txt" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/HandWritten/Generate/txt/image_to_txt/txt2.txt" charset="UTF-8" />
   </component>
 </project>

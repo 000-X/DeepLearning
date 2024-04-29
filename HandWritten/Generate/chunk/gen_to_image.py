@@ -83,7 +83,7 @@ for dir_path, _, file_names in os.walk('../font'):
 
 for font in font_paths:
     generate_text_image(
-        text_file='../txt/Text.txt',
+        text_file='../txt/image_to_txt/Text.txt',
         font_path=font,
         font_size=24,
         tile_width=32,

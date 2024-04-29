@@ -6,16 +6,11 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-
-def read_characters(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        characters = [line.strip() for line in file if line.strip() != '']
-    return characters
+import CoderC
 
 
 def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, image_height):
-    loc = []
-    flag = []
+    loc, flag = [], []
     seq_len = feat_width * feat_height
     scale_x = image_width / feat_width
     scale_y = image_height / feat_height
@@ -30,7 +25,7 @@ def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, im
         feature_y = int(y_center / scale_y)
 
         # 确保索引在有效范围内
-        feature_index = feature_y * 7 + feature_x
+        feature_index = feature_y * feat_width + feature_x
         if 0 <= feature_index < seq_len:
             # 归一化坐标
             norm_bbox = [
@@ -39,8 +34,9 @@ def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, im
                 round(bbox[2] / image_width, 5),
                 round(bbox[3] / image_height, 5)
             ]
-            loc.append((feature_index, torch.tensor(norm_bbox, dtype=torch.float)))
-            flag.append(feature_index)
+            if feature_index not in loc:
+                loc.append((feature_index, torch.tensor(norm_bbox, dtype=torch.float)))
+                flag.append(feature_index)
 
     # 填充序列化标签
     labels_loc = torch.zeros((seq_len, 4), dtype=torch.float)
@@ -51,13 +47,12 @@ def stand_labels_loc(image_annotations, feat_width, feat_height, image_width, im
 
 
 class HandwritingOCRDataset(Dataset):
-    def __init__(self, font_path, char_set, transform=None):
+    def __init__(self, font_path, transform=None):
         self.annotations_files = []
         self.images_dir = []
-        self.char_set = char_set
         self.transform = transform or transforms.ToTensor()
-        self.char_to_idx = {char: index for index, char in enumerate(char_set)}
-        self.num_classes = len(char_set)
+        self.Coder = CoderC.CoderC()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         with open(font_path, 'r', encoding='UTF-8') as f:
             for line in f:
@@ -79,11 +74,9 @@ class HandwritingOCRDataset(Dataset):
 
         image_path = os.path.join(self.images_dir[idx], annotation['image_name'])
         image = Image.open(image_path).convert('RGB')
-
         original_width, original_height = image.size
         image = self.transform(image)
 
-        # 处理字符边界伸缩映射情况; flag是对应一维序列数组的索引
         labels_loc, flag = stand_labels_loc(
             image_annotations=annotation,
             feat_width=14,
@@ -91,21 +84,14 @@ class HandwritingOCRDataset(Dataset):
             image_width=original_width,
             image_height=original_height,
         )
-        # 处理文本映射情况，基于序列化
-        # 初始化文本标签序列为"空白"类别
-        # 初始化文本标签序列
-        labels_cls = torch.full((14 * 14,), self.char_to_idx['NULL'], dtype=torch.long)  # 假设None对应无字符的情况
 
+        labels_cls = torch.full((196,), self.Coder.get_idx('NULL'), dtype=torch.long)
+        j = 0
         for char_info in annotation['chars']:
-            i = char_info['char_index']
-            char_idx = self.char_to_idx.get(char_info['text_char'], self.char_to_idx['NULL'])  # 使用默认索引值防止 None
-            labels_cls[flag[i]] = char_idx  # 直接赋值，无需创建新的 tensor
+            char_idx = self.Coder.get_idx(char_info['text_char'])
+            labels_cls[flag[j]] = char_idx
+            j += 1
 
-        # print(f"image shape --> {image.shape}")
-        # print(f"cls shape --> {labels_cls.shape}")    # 字符集的长度序列
-        # print(f"cls --> {labels_cls}")    # 字符集的长度序列
-        # print(f"loc shape --> {labels_loc.shape}")    # [feature, 4]
-        # print(f"loc --> {labels_loc}")
         return image, labels_cls, labels_loc
 
 # 示例代码，初始化数据集和数据加载器

@@ -11,7 +11,7 @@ def generate_dataset(text_file, font_paths, output_dir, margin=20, max_chars_per
     paths = []
 
     with open(text_file, 'r', encoding='utf-8') as file:
-        paragraphs = file.read().split('\n\n')  # Split text into paragraphs separated by double newlines
+        paragraphs = file.read().split('\n\n')  # 按段落分割
 
     for font_path in font_paths:
         font_size = 24
@@ -29,6 +29,7 @@ def generate_dataset(text_file, font_paths, output_dir, margin=20, max_chars_per
         for index, paragraph in enumerate(paragraphs):
             lines = paragraph.split('\n')
             processed_lines = []
+            image_height = margin
 
             for line in lines:
                 start = 0
@@ -39,17 +40,15 @@ def generate_dataset(text_file, font_paths, output_dir, margin=20, max_chars_per
                     processed_lines.append(line[start:end].strip())
                     start = end
 
-            # Calculate the image dimensions based on the processed lines
-            max_line_width = max(
-                font.getbbox(line)[2] for line in processed_lines) + 2 * margin if processed_lines else 0
-            image_height = sum(font.getbbox(line)[3] for line in processed_lines) + (len(processed_lines) + 1) * margin
+            max_line_width = max((font.getbbox(line)[2] for line in processed_lines), default=0) + 2 * margin
+            image_height += sum((font.getbbox(line)[3] for line in processed_lines),
+                                start=margin * (len(processed_lines) + 1))
 
             image = Image.new('RGB', (max_line_width, image_height), 'white')
             draw = ImageDraw.Draw(image)
             current_h = margin
-            text = paragraph.split(' ')
-            annotations = {'image_name': f"paragraph_{index + 1}.png", 'image_text': paragraph, 'chars': []}
 
+            annotations = {'image_name': f"paragraph_{index + 1}.png", 'image_text': paragraph, 'chars': []}
             for line in processed_lines:
                 current_w = margin
                 draw.text((current_w, current_h), line, fill='black', font=font)
@@ -75,11 +74,4 @@ def generate_dataset(text_file, font_paths, output_dir, margin=20, max_chars_per
         for path in paths:
             f.write(path + '\n')
 
-    print("Dataset generation complete.")
-
-# Example usage
-# generate_dataset(
-#     text_file='text.txt',
-#     font_paths=['path/to/font.ttf'],
-#     output_dir='output_directory'
-# )
+    print("数据集生成完成。")
