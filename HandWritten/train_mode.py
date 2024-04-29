@@ -82,7 +82,8 @@ class HandwritingOCRTrainer:
             # print(f"localization shape --> {localizations.shape}")
 
             loss1 = self.loss(classifications, localizations, labels, boxes)
-            loss1.sum().backward()
+            loss2 = loss1.sum().mean()
+            loss2.backward()
             self.optimizer.step()
             # print(f"Train loss_cls: {loss_cls}, Train loss_loc: {loss_loc}")
 
@@ -90,7 +91,7 @@ class HandwritingOCRTrainer:
             loc_acc = loss.localization_accuracy(localizations, boxes)
             # print(f"Training cls_acc: {cls_acc}; loc_acc: {loc_acc}")
 
-            total_acc += cls_acc + loc_acc
+            total_acc += (cls_acc * 0.5 + loc_acc * 0.5)
             total_loss += loss1.sum()
             num_batches += 1
 
@@ -112,7 +113,7 @@ class HandwritingOCRTrainer:
                 classifications, localizations = self.model(images)
 
                 loss1 = self.loss(classifications, localizations, labels, boxes)
-                total_loss += loss1.sum()
+                total_loss += loss1.sum().mean()
                 # print(f"val loss {loss1}")
                 # breakpoint()
 
@@ -120,7 +121,7 @@ class HandwritingOCRTrainer:
                 loc_acc = loss.localization_accuracy(localizations, boxes)
                 # print(f"Training cls_acc: {cls_acc}; loc_acc: {loc_acc}")
 
-                total_acc += cls_acc + loc_acc
+                total_acc += (cls_acc * 0.5 + loc_acc * 0.5)
                 num_batches += 1
 
         avg_loss = total_loss / num_batches
